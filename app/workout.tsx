@@ -675,7 +675,7 @@ const s = StyleSheet.create({
   setDot:   { width: 8, height: 8, borderRadius: 4, opacity: 0.5 },
   setLabel: { fontSize: 12, fontWeight: '600', color: C.textMuted, marginLeft: 6 },
 
-  scroll:        { flex: 1 },
+  scroll:        { flex: 1, backgroundColor: C.bg },
   scrollContent: { padding: 20, paddingBottom: 120 },
 
   card: {
@@ -695,7 +695,7 @@ const s = StyleSheet.create({
   actions: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     flexDirection: 'row', gap: 12, padding: 20, paddingBottom: 36,
-    backgroundColor: C.bg, borderTopWidth: 1, borderColor: C.border,
+    backgroundColor: C.bg, borderTopWidth: 1, borderColor: C.border, zIndex: 10,
   },
   skipBtn: {
     flex: 1, backgroundColor: C.card, borderRadius: 16, paddingVertical: 16,
@@ -715,10 +715,10 @@ const s = StyleSheet.create({
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.65)' },
   sheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: '#0F1628', borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    padding: 24, paddingBottom: 48, borderWidth: 1, borderColor: C.border, borderBottomWidth: 0,
+    backgroundColor: C.card, borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    padding: 24, paddingBottom: 48, borderWidth: 1, borderColor: C.border, borderBottomWidth: 0, zIndex: 50,
   },
-  sheetHandle: { width: 38, height: 4, backgroundColor: '#2A3050', borderRadius: 2, alignSelf: 'center', marginBottom: 18 },
+  sheetHandle: { width: 38, height: 4, backgroundColor: C.border, borderRadius: 2, alignSelf: 'center', marginBottom: 18 },
   sheetTitle:  { fontSize: 19, fontWeight: '800', color: C.text, marginBottom: 16 },
   sheetOpt:    { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 16, borderTopWidth: 1, borderColor: C.border },
   sheetOptIcon:  { fontSize: 26 },

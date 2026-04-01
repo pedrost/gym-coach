@@ -484,6 +484,7 @@ const styles = StyleSheet.create({
   stepContainer: {
     flex: 1,
     paddingHorizontal: 24,
+    backgroundColor: C.bg,
   },
   step: {
     flex: 1,
@@ -606,6 +607,7 @@ const styles = StyleSheet.create({
     right: 0,
     height: ITEM_H * 2,
     zIndex: 2,
+    backgroundColor: C.bg,
   },
   pickerFadeBottom: {
     position: 'absolute',
@@ -614,6 +616,7 @@ const styles = StyleSheet.create({
     right: 0,
     height: ITEM_H * 2,
     zIndex: 2,
+    backgroundColor: C.bg,
   },
   pickerItem: {
     justifyContent: 'center',

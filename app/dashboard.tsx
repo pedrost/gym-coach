@@ -243,7 +243,7 @@ export default function DashboardScreen() {
         </View>
       ) : (
         <Animated.ScrollView
-          style={fadeStyle}
+          style={[fadeStyle, { backgroundColor: C.bg }]}
           contentContainerStyle={ds.scroll}
           showsVerticalScrollIndicator={false}
         >

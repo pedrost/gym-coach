@@ -40,7 +40,6 @@ import {
 } from '../lib/storage'
 
 const { width: W } = Dimensions.get('window')
-const workout = getActiveWorkout()
 
 // ─── Pulsing exercise illustration ───────────────────────────────────────────
 
@@ -217,8 +216,9 @@ type SkipStep = 'why' | 'cantdo'
 
 export default function WorkoutScreen() {
   const router = useRouter()
+  const workout = getActiveWorkout()   // read inside component so each mount gets fresh data
 
-  const [exercises, setExercises] = useState<Exercise[]>(workout?.exercises ?? [])
+  const [exercises, setExercises] = useState<Exercise[]>(() => getActiveWorkout()?.exercises ?? [])
   const [currentIdx, setCurrentIdx] = useState(0)
   const [currentSetNum, setCurrentSetNum] = useState(1)
   const [currentWeight, setCurrentWeight] = useState(0)

@@ -5,8 +5,11 @@ import {
   StyleSheet,
   TouchableOpacity,
   Modal,
-  Dimensions,
   ScrollView,
+  TextInput,
+  Dimensions,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native'
 import Animated, {
   useSharedValue,
@@ -20,318 +23,410 @@ import Animated, {
 } from 'react-native-reanimated'
 import { useRouter } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { C, MUSCLE_COLORS } from '../lib/theme'
 import { Exercise } from '../lib/workoutData'
 import { getActiveWorkout, setCompletedWorkout } from '../lib/workoutStore'
-import {
-  getReplacementExercise,
-  getReducedExercise,
-  estimateCalories,
-} from '../lib/workoutEngine'
+import { getReplacementExercise, getReducedExercise } from '../lib/workoutEngine'
 import {
   getUserProfile,
   getDislikedExercises,
   addDislikedExercise,
   saveWorkoutRecord,
+  saveWeightForExercise,
+  getLastWeightForExercise,
   UserProfile,
+  SetRecord,
+  ExerciseRecord,
 } from '../lib/storage'
 
 const { width: W } = Dimensions.get('window')
+const workout = getActiveWorkout()
 
-const C = {
-  bg: '#0A0A0A',
-  card: '#1A1A1A',
-  accent: '#E8FF47',
-  text: '#FFFFFF',
-  muted: '#666666',
-  border: '#2A2A2A',
-  danger: '#FF5252',
-}
-
-type SkipStep = 'why' | 'cantdo'
-type Phase = 'exercise' | 'rest'
-
-function usePulse() {
-  const scale = useSharedValue(1)
-  const opacity = useSharedValue(0.7)
-
-  useEffect(() => {
-    scale.value = withRepeat(
-      withSequence(withTiming(1.12, { duration: 900 }), withTiming(1, { duration: 900 })),
-      -1,
-      false
-    )
-    opacity.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 900 }),
-        withTiming(0.6, { duration: 900 })
-      ),
-      -1,
-      false
-    )
-  }, [])
-
-  return useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-    opacity: opacity.value,
-  }))
-}
+// ─── Pulsing exercise illustration ───────────────────────────────────────────
 
 function PulsingShape({ color }: { color: string }) {
-  const pulse = usePulse()
+  const scale = useSharedValue(1)
   const rotate = useSharedValue(0)
 
   useEffect(() => {
+    scale.value = withRepeat(
+      withSequence(withTiming(1.1, { duration: 1000 }), withTiming(1, { duration: 1000 })),
+      -1, false
+    )
     rotate.value = withRepeat(
-      withTiming(360, { duration: 12000, easing: Easing.linear }),
-      -1,
-      false
+      withTiming(360, { duration: 14000, easing: Easing.linear }),
+      -1, false
     )
   }, [])
 
-  const rotateStyle = useAnimatedStyle(() => ({
+  const outerStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rotate.value}deg` }],
+  }))
+  const innerStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
   }))
 
   return (
-    <View style={styles.shapeContainer}>
-      <Animated.View style={[styles.shapeOuter, { backgroundColor: color + '18' }, rotateStyle]}>
-        <Animated.View style={[styles.shapeInner, { backgroundColor: color + '50' }, pulse]}>
-          <View style={[styles.shapeCore, { backgroundColor: color + 'CC' }]} />
+    <View style={shapes.container}>
+      <Animated.View style={[shapes.outer, { backgroundColor: color + '14' }, outerStyle]}>
+        <Animated.View style={[shapes.inner, { backgroundColor: color + '40' }, innerStyle]}>
+          <View style={[shapes.core, { backgroundColor: color + 'BB' }]} />
         </Animated.View>
       </Animated.View>
     </View>
   )
 }
 
-function RestTimer({
-  seconds,
-  onSkip,
-  exerciseName,
-}: {
-  seconds: number
-  onSkip: () => void
-  exerciseName: string
+const shapes = StyleSheet.create({
+  container: { height: 200, justifyContent: 'center', alignItems: 'center' },
+  outer:  { width: 150, height: 150, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
+  inner:  { width: 100, height: 100, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
+  core:   { width: 58,  height: 58,  borderRadius: 10 },
+})
+
+// ─── Rest timer ───────────────────────────────────────────────────────────────
+
+function RestTimer({ seconds, onSkip, nextLabel }: {
+  seconds: number; onSkip: () => void; nextLabel: string
 }) {
-  const progress = useSharedValue(1)
-
+  const bar = useSharedValue(1)
   useEffect(() => {
-    progress.value = withTiming(0, { duration: seconds * 1000, easing: Easing.linear })
+    bar.value = withTiming(0, { duration: seconds * 1000, easing: Easing.linear })
   }, [])
+  const barStyle = useAnimatedStyle(() => ({ width: `${bar.value * 100}%` }))
 
-  const barStyle = useAnimatedStyle(() => ({
-    width: `${progress.value * 100}%`,
-  }))
-
-  const mins = Math.floor(seconds / 60)
-  const secs = seconds % 60
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
 
   return (
-    <View style={styles.restContainer}>
-      <Text style={styles.restLabel}>Rest time</Text>
-      <Text style={styles.restTimer}>
-        {mins > 0 ? `${mins}:${String(secs).padStart(2, '0')}` : `${seconds}s`}
-      </Text>
-      <Text style={styles.restNext}>
-        Up next: <Text style={styles.restNextName}>{exerciseName}</Text>
-      </Text>
-      <View style={styles.restTrack}>
-        <Animated.View style={[styles.restFill, barStyle]} />
+    <View style={rest.container}>
+      <Text style={rest.label}>Rest</Text>
+      <Text style={rest.timer}>{m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${seconds}s`}</Text>
+      <Text style={rest.next}>Up next: <Text style={rest.nextName}>{nextLabel}</Text></Text>
+      <View style={rest.track}>
+        <Animated.View style={[rest.fill, barStyle]} />
       </View>
-      <TouchableOpacity style={styles.skipRestBtn} onPress={onSkip} activeOpacity={0.8}>
-        <Text style={styles.skipRestBtnText}>Skip Rest</Text>
+      <TouchableOpacity style={rest.skipBtn} onPress={onSkip} activeOpacity={0.8}>
+        <Text style={rest.skipText}>Skip Rest</Text>
       </TouchableOpacity>
     </View>
   )
 }
 
+const rest = StyleSheet.create({
+  container: {
+    backgroundColor: C.card,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 32,
+    alignItems: 'center',
+  },
+  label:   { fontSize: 12, fontWeight: '700', color: C.textMuted, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 },
+  timer:   { fontSize: 68, fontWeight: '800', color: C.purple, lineHeight: 76, marginBottom: 12 },
+  next:    { fontSize: 15, color: C.textMuted, marginBottom: 24 },
+  nextName:{ fontWeight: '700', color: C.text },
+  track:   { height: 4, width: '100%', backgroundColor: C.border, borderRadius: 2, overflow: 'hidden', marginBottom: 24 },
+  fill:    { height: '100%', backgroundColor: C.purple, borderRadius: 2 },
+  skipBtn: { borderWidth: 1.5, borderColor: C.border, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 28 },
+  skipText:{ fontSize: 14, fontWeight: '700', color: C.textMuted },
+})
+
+// ─── Weight Input ─────────────────────────────────────────────────────────────
+
+function WeightInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [text, setText] = useState(value > 0 ? String(value) : '')
+
+  function increment(delta: number) {
+    const next = Math.max(0, Math.round((value + delta) * 10) / 10)
+    onChange(next)
+    setText(next > 0 ? String(next) : '')
+  }
+
+  function onTextChange(t: string) {
+    setText(t)
+    const n = parseFloat(t)
+    if (!isNaN(n) && n >= 0) onChange(n)
+    else if (t === '' || t === '0') onChange(0)
+  }
+
+  return (
+    <View style={wi.container}>
+      <Text style={wi.label}>Weight used</Text>
+      <View style={wi.row}>
+        <TouchableOpacity style={wi.btn} onPress={() => increment(-2.5)} activeOpacity={0.7}>
+          <Text style={wi.btnText}>−</Text>
+        </TouchableOpacity>
+        <View style={wi.inputWrap}>
+          <TextInput
+            style={wi.input}
+            value={text}
+            onChangeText={onTextChange}
+            keyboardType="decimal-pad"
+            placeholder="0"
+            placeholderTextColor={C.textMuted}
+            selectTextOnFocus
+          />
+          <Text style={wi.unit}>kg</Text>
+        </View>
+        <TouchableOpacity style={wi.btn} onPress={() => increment(2.5)} activeOpacity={0.7}>
+          <Text style={wi.btnText}>+</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  )
+}
+
+const wi = StyleSheet.create({
+  container: {
+    backgroundColor: C.cardAlt,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 16,
+    marginTop: 16,
+  },
+  label: { fontSize: 12, fontWeight: '700', color: C.textMuted, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 12 },
+  row:   { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  btn: {
+    width: 48,
+    height: 48,
+    backgroundColor: C.card,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  btnText:   { fontSize: 22, fontWeight: '400', color: C.purple, lineHeight: 28 },
+  inputWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center' },
+  input: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: C.text,
+    textAlign: 'center',
+    minWidth: 80,
+  },
+  unit: { fontSize: 16, fontWeight: '600', color: C.textMuted },
+})
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+
+type Phase = 'exercise' | 'rest'
+type SkipStep = 'why' | 'cantdo'
+
 export default function WorkoutScreen() {
   const router = useRouter()
-  const workout = getActiveWorkout()
 
   const [exercises, setExercises] = useState<Exercise[]>(workout?.exercises ?? [])
   const [currentIdx, setCurrentIdx] = useState(0)
-  const [completedIds, setCompletedIds] = useState<string[]>([])
+  const [currentSetNum, setCurrentSetNum] = useState(1)
+  const [currentWeight, setCurrentWeight] = useState(0)
+  const [exerciseRecords, setExerciseRecords] = useState<ExerciseRecord[]>([])
   const [phase, setPhase] = useState<Phase>('exercise')
   const [restSeconds, setRestSeconds] = useState(0)
   const [restKey, setRestKey] = useState(0)
   const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [startTime] = useState(Date.now())
 
   const [skipVisible, setSkipVisible] = useState(false)
   const [skipStep, setSkipStep] = useState<SkipStep>('why')
-  const [reducedExercise, setReducedExercise] = useState<Exercise | null>(null)
   const [toastMsg, setToastMsg] = useState('')
 
-  const cardOpacity = useSharedValue(1)
-  const cardScale = useSharedValue(1)
-  const cardX = useSharedValue(0)
-  const skipSheetY = useSharedValue(400)
+  const cardOpacity  = useSharedValue(1)
+  const cardScale    = useSharedValue(1)
+  const cardX        = useSharedValue(0)
+  const skipSheetY   = useSharedValue(500)
   const toastOpacity = useSharedValue(0)
-  const toastY = useSharedValue(20)
+  const toastY       = useSharedValue(8)
 
   useEffect(() => {
     getUserProfile().then((p) => {
-      if (!p) {
-        router.replace('/')
-        return
-      }
+      if (!p) { router.replace('/'); return }
       setProfile(p)
     })
   }, [])
 
-  // Rest timer — one tick per render cycle
+  // Load last-used weight when exercise changes
+  useEffect(() => {
+    const ex = exercises[currentIdx]
+    if (!ex) return
+    getLastWeightForExercise(ex.id).then(setCurrentWeight)
+    setCurrentSetNum(1)
+  }, [currentIdx])
+
+  // Rest timer tick
   useEffect(() => {
     if (phase !== 'rest' || restSeconds <= 0) return
     const id = setTimeout(() => setRestSeconds((s) => Math.max(0, s - 1)), 1000)
     return () => clearTimeout(id)
   }, [phase, restSeconds])
 
-  // Advance when rest hits zero
+  // When rest ends: advance
   useEffect(() => {
     if (phase === 'rest' && restSeconds === 0) {
       setPhase('exercise')
-      setCurrentIdx((i) => i + 1)
       animateCardIn()
     }
   }, [phase, restSeconds])
 
   function animateCardIn() {
-    cardOpacity.value = 0
-    cardScale.value = 0.92
-    cardX.value = 30
-    cardOpacity.value = withTiming(1, { duration: 350 })
-    cardScale.value = withSpring(1, { damping: 16, stiffness: 180 })
-    cardX.value = withSpring(0, { damping: 18, stiffness: 200 })
+    cardOpacity.value = 0; cardScale.value = 0.93; cardX.value = 24
+    cardOpacity.value = withTiming(1, { duration: 320 })
+    cardScale.value   = withSpring(1, { damping: 16 })
+    cardX.value       = withSpring(0, { damping: 18 })
   }
 
-  function animateCardOut(callback: () => void) {
-    cardOpacity.value = withTiming(0, { duration: 220 })
-    cardX.value = withTiming(-W * 0.4, { duration: 220 }, () => {
-      runOnJS(callback)()
-    })
+  function animateCardOut(cb: () => void) {
+    cardOpacity.value = withTiming(0, { duration: 200 })
+    cardX.value = withTiming(-W * 0.35, { duration: 200 }, () => runOnJS(cb)())
   }
 
   function showToast(msg: string) {
     setToastMsg(msg)
-    toastOpacity.value = withTiming(1, { duration: 200 })
-    toastY.value = withTiming(0, { duration: 200 })
+    toastOpacity.value = withTiming(1, { duration: 180 })
+    toastY.value = withTiming(0, { duration: 180 })
     setTimeout(() => {
       toastOpacity.value = withTiming(0, { duration: 400 })
-      toastY.value = withTiming(-10, { duration: 400 })
-    }, 2400)
+      toastY.value = withTiming(-8, { duration: 400 })
+    }, 2500)
   }
 
-  const currentExercise = exercises[currentIdx]
-  const nextExercise = exercises[currentIdx + 1]
-  const isLastExercise = currentIdx >= exercises.length - 1
+  function getRestTime(): number {
+    if (!profile) return 60
+    return profile.level === 'advanced' ? 120 : profile.level === 'intermediate' ? 90 : 60
+  }
 
-  async function handleDone() {
-    if (!profile || !currentExercise) return
+  function startRest() {
+    setRestSeconds(getRestTime())
+    setRestKey((k) => k + 1)
+    setPhase('rest')
+  }
 
-    const newCompleted = [...completedIds, currentExercise.id]
-    setCompletedIds(newCompleted)
-
-    if (isLastExercise) {
-      finishWorkout(newCompleted)
-      return
+  function recordSet(ex: Exercise, setNum: number, weight: number) {
+    const setRecord: SetRecord = {
+      setNumber: setNum,
+      repsCompleted: ex.reps,
+      weightKg: weight,
     }
-
-    const restTime = profile.level === 'advanced' ? 120 : profile.level === 'intermediate' ? 90 : 60
-
-    animateCardOut(() => {
-      setPhase('rest')
-      setRestSeconds(restTime)
-      setRestKey((k) => k + 1)
+    setExerciseRecords((prev) => {
+      const existing = prev.find((r) => r.exerciseId === ex.id)
+      if (existing) {
+        return prev.map((r) =>
+          r.exerciseId === ex.id ? { ...r, sets: [...r.sets, setRecord] } : r
+        )
+      }
+      return [...prev, {
+        exerciseId: ex.id,
+        exerciseName: ex.name,
+        muscleGroup: ex.muscleGroup,
+        sets: [setRecord],
+        skipped: false,
+      }]
     })
+    // Save last-used weight
+    if (weight > 0) saveWeightForExercise(ex.id, weight)
+  }
+
+  async function handleSetDone() {
+    const ex = exercises[currentIdx]
+    if (!ex || !profile) return
+
+    recordSet(ex, currentSetNum, currentWeight)
+
+    if (currentSetNum < ex.sets) {
+      // More sets remaining — rest between sets
+      setCurrentSetNum((n) => n + 1)
+      animateCardOut(() => {
+        startRest()
+      })
+    } else {
+      // All sets done — move to next exercise
+      if (currentIdx >= exercises.length - 1) {
+        await finishWorkout([...exerciseRecords, {
+          exerciseId: ex.id, exerciseName: ex.name,
+          muscleGroup: ex.muscleGroup,
+          sets: [], skipped: false,
+        }])
+        return
+      }
+      animateCardOut(() => {
+        setCurrentIdx((i) => i + 1)
+        startRest()
+      })
+    }
   }
 
   function handleSkipRest() {
     setPhase('exercise')
-    setCurrentIdx((i) => i + 1)
     animateCardIn()
   }
 
   function openSkipSheet() {
     setSkipStep('why')
-    setReducedExercise(null)
     setSkipVisible(true)
     skipSheetY.value = withSpring(0, { damping: 20, stiffness: 200 })
   }
 
   function closeSkipSheet() {
-    skipSheetY.value = withTiming(400, { duration: 260 })
+    skipSheetY.value = withTiming(500, { duration: 260 })
     setTimeout(() => setSkipVisible(false), 260)
   }
 
-  async function handleCantDo() {
-    setSkipStep('cantdo')
-  }
-
   async function handleDontLike() {
-    if (!currentExercise || !profile) return
-
-    await addDislikedExercise(currentExercise.id)
+    const ex = exercises[currentIdx]
+    if (!ex || !profile) return
+    await addDislikedExercise(ex.id)
     const disliked = await getDislikedExercises()
-    const usedIds = exercises.map((e) => e.id)
-    const replacement = getReplacementExercise(currentExercise, usedIds, disliked, profile.level)
-
+    const replacement = getReplacementExercise(ex, exercises.map((e) => e.id), disliked, profile.level)
     closeSkipSheet()
-
     if (replacement) {
       animateCardOut(() => {
-        setExercises((prev) => {
-          const next = [...prev]
-          next[currentIdx] = replacement
-          return next
-        })
+        setExercises((prev) => { const n = [...prev]; n[currentIdx] = replacement; return n })
         animateCardIn()
       })
       showToast("Got it! I'll avoid this one next time.")
     } else {
-      skipCurrentExercise()
-      showToast('Exercise removed.')
+      skipExercise()
     }
   }
 
   async function handleLowerWeight() {
-    if (!currentExercise) return
-    const reduced = getReducedExercise(currentExercise)
-    setReducedExercise(reduced)
-    setExercises((prev) => {
-      const next = [...prev]
-      next[currentIdx] = reduced
-      return next
-    })
+    const ex = exercises[currentIdx]
+    if (!ex) return
+    const reduced = getReducedExercise(ex)
+    setExercises((prev) => { const n = [...prev]; n[currentIdx] = reduced; return n })
     closeSkipSheet()
     animateCardIn()
-    showToast('Adjusted — take it at your own pace.')
+    showToast(`Adjusted to ${reduced.sets}×${reduced.reps} — you've got this.`)
   }
 
   async function handleSimilarExercise() {
-    if (!currentExercise || !profile) return
+    const ex = exercises[currentIdx]
+    if (!ex || !profile) return
     const disliked = await getDislikedExercises()
-    const usedIds = exercises.map((e) => e.id)
-    const replacement = getReplacementExercise(currentExercise, usedIds, disliked, profile.level)
-
+    const replacement = getReplacementExercise(ex, exercises.map((e) => e.id), disliked, profile.level)
     closeSkipSheet()
-
     if (replacement) {
       animateCardOut(() => {
-        setExercises((prev) => {
-          const next = [...prev]
-          next[currentIdx] = replacement
-          return next
-        })
+        setExercises((prev) => { const n = [...prev]; n[currentIdx] = replacement; return n })
         animateCardIn()
       })
     } else {
-      showToast('No alternative found — giving it a go!')
+      showToast('No alternative found — you can do it! 💪')
     }
   }
 
-  function skipCurrentExercise() {
+  function skipExercise() {
+    const ex = exercises[currentIdx]
+    setExerciseRecords((prev) => {
+      const exists = prev.find((r) => r.exerciseId === ex?.id)
+      if (exists || !ex) return prev
+      return [...prev, { exerciseId: ex.id, exerciseName: ex.name, muscleGroup: ex.muscleGroup, sets: [], skipped: true }]
+    })
     closeSkipSheet()
-    if (isLastExercise) {
-      finishWorkout(completedIds)
+    if (currentIdx >= exercises.length - 1) {
+      finishWorkout(exerciseRecords)
       return
     }
     animateCardOut(() => {
@@ -340,29 +435,34 @@ export default function WorkoutScreen() {
     })
   }
 
-  async function finishWorkout(doneIds: string[]) {
-    const doneExercises = exercises.filter((e) => doneIds.includes(e.id))
-    const totalSets = doneExercises.reduce((s, e) => s + e.sets, 0)
-    const calories = estimateCalories(doneExercises)
+  async function finishWorkout(finalRecords: ExerciseRecord[]) {
+    const doneRecords = finalRecords.filter((r) => !r.skipped && r.sets.length > 0)
+    const totalSets = doneRecords.reduce((s, r) => s + r.sets.length, 0)
+    const totalVolumeKg = doneRecords.reduce(
+      (s, r) => s + r.sets.reduce((ss, set) => ss + set.weightKg * set.repsCompleted, 0), 0
+    )
+    const calories = Math.round(totalSets * 5.5)
+    const durationMinutes = Math.round((Date.now() - startTime) / 60000)
 
     const record = {
       id: Date.now().toString(),
       date: new Date().toISOString(),
       muscleGroups: workout?.muscleGroups ?? [],
-      exercisesCompleted: doneExercises.length,
+      exercises: finalRecords,
+      durationMinutes,
       totalSets,
+      totalVolumeKg: Math.round(totalVolumeKg),
       estimatedCalories: calories,
     }
     await saveWorkoutRecord(record)
 
     setCompletedWorkout({
       userName: profile?.name ?? '',
-      exercisesCompleted: doneExercises.length,
+      exercisesCompleted: doneRecords.length,
       totalSets,
       estimatedCalories: calories,
       muscleGroups: workout?.muscleGroups ?? [],
     })
-
     router.replace('/complete')
   }
 
@@ -370,155 +470,164 @@ export default function WorkoutScreen() {
     opacity: cardOpacity.value,
     transform: [{ scale: cardScale.value }, { translateX: cardX.value }],
   }))
-
-  const skipSheetStyle = useAnimatedStyle(() => ({
+  const skipStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: skipSheetY.value }],
   }))
-
   const toastStyle = useAnimatedStyle(() => ({
     opacity: toastOpacity.value,
     transform: [{ translateY: toastY.value }],
   }))
 
-  if (!currentExercise) {
-    return <View style={styles.safe} />
-  }
+  const ex = exercises[currentIdx]
+  if (!ex) return <View style={s.safe} />
 
-  const groupLabel = currentExercise.muscleGroup.charAt(0).toUpperCase() + currentExercise.muscleGroup.slice(1)
+  const groupColor = MUSCLE_COLORS[ex.muscleGroup] ?? C.purple
+  const nextEx = exercises[currentIdx + 1]
+  const progressPct = (currentIdx / exercises.length) * 100
   const totalMinutes = exercises.length * 7
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={s.safe}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.replace('/')} style={styles.backBtn} activeOpacity={0.7}>
-          <Text style={styles.backBtnText}>✕</Text>
+      <View style={s.header}>
+        <TouchableOpacity style={s.closeBtn} onPress={() => router.replace('/')} activeOpacity={0.7}>
+          <Text style={s.closeBtnText}>✕</Text>
         </TouchableOpacity>
-        <View style={styles.headerMeta}>
-          <Text style={styles.headerTitle}>
-            {workout?.muscleGroups.map((g) => g.charAt(0).toUpperCase() + g.slice(1)).join(' · ')}
+        <View style={s.headerCenter}>
+          <Text style={s.headerTitle}>
+            {workout?.muscleGroups.map((g) => g[0].toUpperCase() + g.slice(1)).join(' · ')}
           </Text>
-          <Text style={styles.headerSub}>~{totalMinutes} min</Text>
+          <Text style={s.headerSub}>~{totalMinutes} min</Text>
         </View>
-        <View style={styles.headerCount}>
-          <Text style={styles.headerCountText}>
-            {currentIdx + 1}/{exercises.length}
-          </Text>
+        <View style={s.counterBadge}>
+          <Text style={s.counterText}>{currentIdx + 1}/{exercises.length}</Text>
         </View>
       </View>
 
       {/* Progress bar */}
-      <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${((currentIdx) / exercises.length) * 100}%` }]} />
+      <View style={s.progressTrack}>
+        <View style={[s.progressFill, { width: `${progressPct}%`, backgroundColor: groupColor }]} />
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {phase === 'rest' ? (
-          <RestTimer
-            key={restKey}
-            seconds={restSeconds}
-            onSkip={handleSkipRest}
-            exerciseName={nextExercise?.name ?? 'Next Exercise'}
-          />
-        ) : (
-          <Animated.View style={[styles.card, cardStyle]}>
-            {/* Exercise illustration */}
-            <PulsingShape color={currentExercise.color} />
-
-            {/* Exercise info */}
-            <View style={styles.exerciseInfo}>
-              <View style={styles.exerciseBadge}>
-                <Text style={styles.exerciseBadgeText}>{groupLabel}</Text>
-              </View>
-              <Text style={styles.exerciseName}>{currentExercise.name}</Text>
-              <Text style={styles.exerciseSetsReps}>
-                {currentExercise.sets} × {currentExercise.repsLabel ?? currentExercise.reps}
-              </Text>
-              <Text style={styles.exerciseDesc}>{currentExercise.description}</Text>
-            </View>
-          </Animated.View>
-        )}
-      </ScrollView>
-
-      {/* Action buttons */}
+      {/* Set dots */}
       {phase === 'exercise' && (
-        <View style={styles.actions}>
-          <TouchableOpacity style={styles.skipBtn} onPress={openSkipSheet} activeOpacity={0.8}>
-            <Text style={styles.skipBtnText}>Skip</Text>
+        <View style={s.setDots}>
+          {Array.from({ length: ex.sets }).map((_, i) => (
+            <View
+              key={i}
+              style={[s.setDot, i < currentSetNum - 1
+                ? { backgroundColor: groupColor }
+                : i === currentSetNum - 1
+                  ? { backgroundColor: groupColor, opacity: 1, transform: [{ scale: 1.2 }] }
+                  : { backgroundColor: C.border }
+              ]}
+            />
+          ))}
+          <Text style={s.setLabel}>Set {currentSetNum} of {ex.sets}</Text>
+        </View>
+      )}
+
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={80}
+      >
+        <ScrollView
+          style={s.scroll}
+          contentContainerStyle={s.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {phase === 'rest' ? (
+            <RestTimer
+              key={restKey}
+              seconds={restSeconds}
+              onSkip={handleSkipRest}
+              nextLabel={
+                currentSetNum <= ex.sets
+                  ? `${ex.name} — Set ${currentSetNum}`
+                  : (nextEx?.name ?? 'Last exercise done!')
+              }
+            />
+          ) : (
+            <Animated.View style={[s.card, cardStyle]}>
+              <PulsingShape color={groupColor} />
+              <View style={s.exerciseInfo}>
+                <View style={[s.badge, { backgroundColor: groupColor + '22' }]}>
+                  <Text style={[s.badgeText, { color: groupColor }]}>
+                    {ex.muscleGroup.toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={s.exerciseName}>{ex.name}</Text>
+                <Text style={[s.setsReps, { color: groupColor }]}>
+                  {ex.sets} × {ex.repsLabel ?? ex.reps}
+                </Text>
+                <Text style={s.desc}>{ex.description}</Text>
+              </View>
+              <WeightInput value={currentWeight} onChange={setCurrentWeight} />
+            </Animated.View>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Actions */}
+      {phase === 'exercise' && (
+        <View style={s.actions}>
+          <TouchableOpacity style={s.skipBtn} onPress={openSkipSheet} activeOpacity={0.8}>
+            <Text style={s.skipText}>Skip</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.doneBtn} onPress={handleDone} activeOpacity={0.9}>
-            <Text style={styles.doneBtnText}>✓ Done</Text>
+          <TouchableOpacity style={[s.doneBtn, { backgroundColor: groupColor }]} onPress={handleSetDone} activeOpacity={0.9}>
+            <Text style={s.doneText}>
+              {currentSetNum < ex.sets ? `✓ Set ${currentSetNum} Done` : '✓ Exercise Done'}
+            </Text>
           </TouchableOpacity>
         </View>
       )}
 
       {/* Toast */}
-      <Animated.View style={[styles.toast, toastStyle]} pointerEvents="none">
-        <Text style={styles.toastText}>{toastMsg}</Text>
+      <Animated.View style={[s.toast, toastStyle]} pointerEvents="none">
+        <Text style={s.toastText}>{toastMsg}</Text>
       </Animated.View>
 
-      {/* Skip bottom sheet */}
+      {/* Skip Sheet */}
       {skipVisible && (
         <Modal transparent animationType="none" visible={skipVisible}>
-          <TouchableOpacity
-            style={styles.overlay}
-            activeOpacity={1}
-            onPress={closeSkipSheet}
-          />
-          <Animated.View style={[styles.sheet, skipSheetStyle]}>
-            {skipStep === 'why' && (
+          <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={closeSkipSheet} />
+          <Animated.View style={[s.sheet, skipStyle]}>
+            <View style={s.sheetHandle} />
+            {skipStep === 'why' ? (
               <>
-                <View style={styles.sheetHandle} />
-                <Text style={styles.sheetTitle}>Why are you skipping?</Text>
-                <TouchableOpacity
-                  style={styles.sheetOption}
-                  onPress={handleCantDo}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.sheetOptionIcon}>🚫</Text>
+                <Text style={s.sheetTitle}>Why are you skipping?</Text>
+                <TouchableOpacity style={s.sheetOpt} onPress={() => setSkipStep('cantdo')} activeOpacity={0.8}>
+                  <Text style={s.sheetOptIcon}>🚫</Text>
                   <View>
-                    <Text style={styles.sheetOptionTitle}>Can't do this</Text>
-                    <Text style={styles.sheetOptionSub}>Injury, equipment or ability issue</Text>
+                    <Text style={s.sheetOptTitle}>Can't do this</Text>
+                    <Text style={s.sheetOptSub}>Equipment or mobility issue</Text>
                   </View>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.sheetOption}
-                  onPress={handleDontLike}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.sheetOptionIcon}>👎</Text>
+                <TouchableOpacity style={s.sheetOpt} onPress={handleDontLike} activeOpacity={0.8}>
+                  <Text style={s.sheetOptIcon}>👎</Text>
                   <View>
-                    <Text style={styles.sheetOptionTitle}>Don't like it</Text>
-                    <Text style={styles.sheetOptionSub}>We'll remove it from your list</Text>
+                    <Text style={s.sheetOptTitle}>Don't like it</Text>
+                    <Text style={s.sheetOptSub}>Remove from future sessions</Text>
                   </View>
                 </TouchableOpacity>
               </>
-            )}
-
-            {skipStep === 'cantdo' && (
+            ) : (
               <>
-                <View style={styles.sheetHandle} />
-                <Text style={styles.sheetTitle}>No worries. What would{'\n'}you prefer?</Text>
-                <TouchableOpacity
-                  style={styles.sheetOption}
-                  onPress={handleLowerWeight}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.sheetOptionIcon}>⬇️</Text>
+                <Text style={s.sheetTitle}>What would you prefer?</Text>
+                <TouchableOpacity style={s.sheetOpt} onPress={handleLowerWeight} activeOpacity={0.8}>
+                  <Text style={s.sheetOptIcon}>⬇️</Text>
                   <View>
-                    <Text style={styles.sheetOptionTitle}>Lower the weight</Text>
-                    <Text style={styles.sheetOptionSub}>Reduce sets & reps to match your level</Text>
+                    <Text style={s.sheetOptTitle}>Lower the weight</Text>
+                    <Text style={s.sheetOptSub}>Reduce sets & reps</Text>
                   </View>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.sheetOption}
-                  onPress={handleSimilarExercise}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.sheetOptionIcon}>🔄</Text>
+                <TouchableOpacity style={s.sheetOpt} onPress={handleSimilarExercise} activeOpacity={0.8}>
+                  <Text style={s.sheetOptIcon}>🔄</Text>
                   <View>
-                    <Text style={styles.sheetOptionTitle}>Similar exercise</Text>
-                    <Text style={styles.sheetOptionSub}>Swap for another from the same group</Text>
+                    <Text style={s.sheetOptTitle}>Similar exercise</Text>
+                    <Text style={s.sheetOptSub}>Swap for same muscle group</Text>
                   </View>
                 </TouchableOpacity>
               </>
@@ -530,7 +639,9 @@ export default function WorkoutScreen() {
   )
 }
 
-const styles = StyleSheet.create({
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
 
   header: {
@@ -538,43 +649,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 8,
-    paddingBottom: 12,
+    paddingBottom: 10,
   },
-  backBtn: {
-    width: 38,
-    height: 38,
-    backgroundColor: C.card,
-    borderRadius: 12,
-    justifyContent: 'center',
+  closeBtn: {
+    width: 36, height: 36, backgroundColor: C.card, borderRadius: 10,
+    justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: C.border,
+  },
+  closeBtnText: { fontSize: 14, color: C.textMuted, fontWeight: '700' },
+  headerCenter: { flex: 1, paddingHorizontal: 12 },
+  headerTitle:  { fontSize: 15, fontWeight: '800', color: C.text },
+  headerSub:    { fontSize: 12, color: C.textMuted, marginTop: 1 },
+  counterBadge: { backgroundColor: C.card, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: C.border },
+  counterText:  { fontSize: 13, fontWeight: '700', color: C.purple },
+
+  progressTrack: { height: 3, backgroundColor: C.border, marginHorizontal: 20, borderRadius: 2, overflow: 'hidden', marginBottom: 10 },
+  progressFill:  { height: '100%', borderRadius: 2 },
+
+  setDots: {
+    flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 20,
+    gap: 6,
+    marginBottom: 8,
   },
-  backBtnText: { color: C.muted, fontSize: 16, fontWeight: '700' },
-  headerMeta: { flex: 1, paddingHorizontal: 14 },
-  headerTitle: { fontSize: 16, fontWeight: '800', color: C.text },
-  headerSub: { fontSize: 13, color: C.muted, marginTop: 2 },
-  headerCount: {
-    backgroundColor: C.card,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  headerCountText: { fontSize: 14, fontWeight: '700', color: C.accent },
+  setDot:   { width: 8, height: 8, borderRadius: 4, opacity: 0.5 },
+  setLabel: { fontSize: 12, fontWeight: '600', color: C.textMuted, marginLeft: 6 },
 
-  progressTrack: {
-    height: 3,
-    backgroundColor: C.border,
-    marginHorizontal: 20,
-    borderRadius: 2,
-    overflow: 'hidden',
-    marginBottom: 4,
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: C.accent,
-    borderRadius: 2,
-  },
-
-  scroll: { flex: 1 },
+  scroll:        { flex: 1 },
   scrollContent: { padding: 20, paddingBottom: 120 },
 
   card: {
@@ -584,194 +685,43 @@ const styles = StyleSheet.create({
     borderColor: C.border,
     overflow: 'hidden',
   },
-
-  shapeContainer: {
-    height: 220,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  shapeOuter: {
-    width: 160,
-    height: 160,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  shapeInner: {
-    width: 110,
-    height: 110,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  shapeCore: {
-    width: 64,
-    height: 64,
-    borderRadius: 12,
-  },
-
-  exerciseInfo: {
-    padding: 24,
-    paddingTop: 16,
-  },
-  exerciseBadge: {
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    alignSelf: 'flex-start',
-    marginBottom: 12,
-  },
-  exerciseBadgeText: { fontSize: 12, fontWeight: '700', color: C.muted, letterSpacing: 0.8 },
-  exerciseName: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: C.text,
-    marginBottom: 8,
-    lineHeight: 34,
-  },
-  exerciseSetsReps: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: C.accent,
-    marginBottom: 16,
-  },
-  exerciseDesc: {
-    fontSize: 15,
-    color: '#999',
-    lineHeight: 22,
-  },
+  exerciseInfo: { padding: 22, paddingTop: 14 },
+  badge:        { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 3, alignSelf: 'flex-start', marginBottom: 10 },
+  badgeText:    { fontSize: 11, fontWeight: '800', letterSpacing: 0.8 },
+  exerciseName: { fontSize: 26, fontWeight: '800', color: C.text, marginBottom: 6, lineHeight: 32 },
+  setsReps:     { fontSize: 20, fontWeight: '700', marginBottom: 12 },
+  desc:         { fontSize: 14, color: C.textDim, lineHeight: 21 },
 
   actions: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    gap: 12,
-    padding: 20,
-    paddingBottom: 36,
-    backgroundColor: C.bg,
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    flexDirection: 'row', gap: 12, padding: 20, paddingBottom: 36,
+    backgroundColor: C.bg, borderTopWidth: 1, borderColor: C.border,
   },
   skipBtn: {
-    flex: 1,
-    backgroundColor: C.card,
-    borderRadius: 18,
-    paddingVertical: 18,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: C.border,
+    flex: 1, backgroundColor: C.card, borderRadius: 16, paddingVertical: 16,
+    alignItems: 'center', borderWidth: 1, borderColor: C.border,
   },
-  skipBtnText: { fontSize: 16, fontWeight: '700', color: C.muted },
-  doneBtn: {
-    flex: 2,
-    backgroundColor: C.accent,
-    borderRadius: 18,
-    paddingVertical: 18,
-    alignItems: 'center',
-  },
-  doneBtnText: { fontSize: 16, fontWeight: '800', color: '#000' },
-
-  restContainer: {
-    backgroundColor: C.card,
-    borderRadius: 28,
-    padding: 32,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  restLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: C.muted,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    marginBottom: 12,
-  },
-  restTimer: {
-    fontSize: 72,
-    fontWeight: '800',
-    color: C.accent,
-    lineHeight: 80,
-    marginBottom: 16,
-  },
-  restNext: { fontSize: 16, color: C.muted, marginBottom: 24 },
-  restNextName: { fontWeight: '700', color: C.text },
-  restTrack: {
-    height: 4,
-    width: '100%',
-    backgroundColor: C.border,
-    borderRadius: 2,
-    overflow: 'hidden',
-    marginBottom: 28,
-  },
-  restFill: { height: '100%', backgroundColor: C.accent, borderRadius: 2 },
-  skipRestBtn: {
-    borderWidth: 1.5,
-    borderColor: C.border,
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-  },
-  skipRestBtnText: { fontSize: 15, fontWeight: '700', color: C.muted },
+  skipText: { fontSize: 15, fontWeight: '700', color: C.textMuted },
+  doneBtn:  { flex: 2.2, borderRadius: 16, paddingVertical: 16, alignItems: 'center' },
+  doneText: { fontSize: 15, fontWeight: '800', color: '#000' },
 
   toast: {
-    position: 'absolute',
-    top: 100,
-    left: 24,
-    right: 24,
-    backgroundColor: '#1E1E1E',
-    borderRadius: 14,
-    padding: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: C.border,
+    position: 'absolute', top: 96, left: 24, right: 24,
+    backgroundColor: C.cardAlt, borderRadius: 14, padding: 14,
+    alignItems: 'center', borderWidth: 1, borderColor: C.border,
   },
-  toastText: { fontSize: 14, fontWeight: '600', color: C.text },
+  toastText: { fontSize: 13, fontWeight: '600', color: C.text },
 
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-  },
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.65)' },
   sheet: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#161616',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    padding: 24,
-    paddingBottom: 48,
-    borderWidth: 1,
-    borderColor: C.border,
-    borderBottomWidth: 0,
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: '#0F1628', borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    padding: 24, paddingBottom: 48, borderWidth: 1, borderColor: C.border, borderBottomWidth: 0,
   },
-  sheetHandle: {
-    width: 40,
-    height: 4,
-    backgroundColor: '#333',
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
-  sheetTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: C.text,
-    marginBottom: 20,
-    lineHeight: 28,
-  },
-  sheetOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    paddingVertical: 18,
-    borderTopWidth: 1,
-    borderColor: C.border,
-  },
-  sheetOptionIcon: { fontSize: 28 },
-  sheetOptionTitle: { fontSize: 17, fontWeight: '700', color: C.text, marginBottom: 2 },
-  sheetOptionSub: { fontSize: 13, color: C.muted },
+  sheetHandle: { width: 38, height: 4, backgroundColor: '#2A3050', borderRadius: 2, alignSelf: 'center', marginBottom: 18 },
+  sheetTitle:  { fontSize: 19, fontWeight: '800', color: C.text, marginBottom: 16 },
+  sheetOpt:    { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 16, borderTopWidth: 1, borderColor: C.border },
+  sheetOptIcon:  { fontSize: 26 },
+  sheetOptTitle: { fontSize: 16, fontWeight: '700', color: C.text, marginBottom: 2 },
+  sheetOptSub:   { fontSize: 13, color: C.textMuted },
 })

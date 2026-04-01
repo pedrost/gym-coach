@@ -26,14 +26,16 @@ import { saveUserProfile } from '../lib/storage'
 
 const { width: W } = Dimensions.get('window')
 
+import { C as THEME } from '../lib/theme'
+
 const C = {
-  bg: '#0A0A0A',
-  card: '#1A1A1A',
-  accent: '#E8FF47',
-  text: '#FFFFFF',
-  muted: '#555555',
-  border: '#2A2A2A',
-  cardBorder: '#2A2A2A',
+  bg:        THEME.bg,
+  card:      THEME.card,
+  accent:    THEME.purple,
+  text:      THEME.text,
+  muted:     THEME.textMuted,
+  border:    THEME.border,
+  cardBorder:THEME.border,
 }
 
 const TOTAL_STEPS = 5

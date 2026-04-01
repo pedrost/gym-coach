@@ -10,271 +10,160 @@ import Animated, {
 } from 'react-native-reanimated'
 import { useRouter } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { C } from '../lib/theme'
 import { getCompletedWorkout, clearCompletedWorkout, clearActiveWorkout } from '../lib/workoutStore'
-
-const C = {
-  bg: '#0A0A0A',
-  card: '#1A1A1A',
-  accent: '#E8FF47',
-  text: '#FFFFFF',
-  muted: '#666666',
-  border: '#2A2A2A',
-}
-
-function StatCard({ icon, value, label }: { icon: string; value: string; label: string }) {
-  const scale = useSharedValue(0.8)
-  const opacity = useSharedValue(0)
-
-  useEffect(() => {
-    scale.value = withDelay(400, withSpring(1, { damping: 14 }))
-    opacity.value = withDelay(400, withTiming(1, { duration: 300 }))
-  }, [])
-
-  const style = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-    opacity: opacity.value,
-  }))
-
-  return (
-    <Animated.View style={[styles.statCard, style]}>
-      <Text style={styles.statIcon}>{icon}</Text>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </Animated.View>
-  )
-}
 
 export default function CompleteScreen() {
   const router = useRouter()
-  const data = getCompletedWorkout()
+  const data   = getCompletedWorkout()
 
-  const checkScale = useSharedValue(0)
+  const ringScale    = useSharedValue(0.3)
+  const ringOpacity  = useSharedValue(0.8)
+  const checkScale   = useSharedValue(0)
   const checkOpacity = useSharedValue(0)
   const titleOpacity = useSharedValue(0)
-  const titleY = useSharedValue(20)
-  const ringScale = useSharedValue(0.3)
-  const ringOpacity = useSharedValue(1)
+  const titleY       = useSharedValue(18)
 
   useEffect(() => {
-    // Ring burst
-    ringScale.value = withTiming(2.2, { duration: 700 })
-    ringOpacity.value = withSequence(
-      withTiming(0.5, { duration: 200 }),
-      withDelay(300, withTiming(0, { duration: 400 }))
-    )
-
-    // Checkmark
-    checkScale.value = withDelay(150, withSpring(1, { damping: 12, stiffness: 180 }))
-    checkOpacity.value = withDelay(150, withTiming(1, { duration: 200 }))
-
-    // Title
-    titleOpacity.value = withDelay(400, withTiming(1, { duration: 400 }))
-    titleY.value = withDelay(400, withTiming(0, { duration: 400 }))
+    ringScale.value   = withTiming(2.4, { duration: 750 })
+    ringOpacity.value = withSequence(withTiming(0.4, { duration: 200 }), withDelay(300, withTiming(0, { duration: 450 })))
+    checkScale.value  = withDelay(150, withSpring(1, { damping: 11, stiffness: 160 }))
+    checkOpacity.value= withDelay(150, withTiming(1, { duration: 200 }))
+    titleOpacity.value= withDelay(450, withTiming(1, { duration: 400 }))
+    titleY.value      = withDelay(450, withTiming(0, { duration: 400 }))
   }, [])
 
-  const checkStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: checkScale.value }],
-    opacity: checkOpacity.value,
-  }))
+  const ringStyle  = useAnimatedStyle(() => ({ transform: [{ scale: ringScale.value }], opacity: ringOpacity.value }))
+  const checkStyle = useAnimatedStyle(() => ({ transform: [{ scale: checkScale.value }], opacity: checkOpacity.value }))
+  const titleStyle = useAnimatedStyle(() => ({ opacity: titleOpacity.value, transform: [{ translateY: titleY.value }] }))
 
-  const titleStyle = useAnimatedStyle(() => ({
-    opacity: titleOpacity.value,
-    transform: [{ translateY: titleY.value }],
-  }))
-
-  const ringStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: ringScale.value }],
-    opacity: ringOpacity.value,
-  }))
-
-  function handleBackHome() {
-    clearCompletedWorkout()
-    clearActiveWorkout()
+  function handleHome() {
+    clearCompletedWorkout(); clearActiveWorkout()
     router.replace('/')
   }
-
-  function handleLogAnother() {
-    clearCompletedWorkout()
-    clearActiveWorkout()
-    router.replace('/')
+  function handleDashboard() {
+    clearCompletedWorkout(); clearActiveWorkout()
+    router.replace('/dashboard')
   }
 
-  const userName = data?.userName ?? ''
-  const exercisesDone = data?.exercisesCompleted ?? 0
-  const totalSets = data?.totalSets ?? 0
-  const calories = data?.estimatedCalories ?? 0
-  const groups = data?.muscleGroups ?? []
+  const name      = data?.userName ?? ''
+  const exercises = data?.exercisesCompleted ?? 0
+  const sets      = data?.totalSets ?? 0
+  const calories  = data?.estimatedCalories ?? 0
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Celebration graphic */}
-        <View style={styles.celebrationArea}>
-          <View style={styles.checkWrapper}>
-            <Animated.View style={[styles.ring, ringStyle]} />
-            <Animated.View style={[styles.checkCircle, checkStyle]}>
-              <Text style={styles.checkmark}>✓</Text>
+    <SafeAreaView style={s.safe}>
+      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+
+        {/* Celebration */}
+        <View style={s.celebArea}>
+          <View style={s.checkWrap}>
+            <Animated.View style={[s.ring, ringStyle]} />
+            <Animated.View style={[s.checkCircle, checkStyle]}>
+              <Text style={s.checkmark}>✓</Text>
             </Animated.View>
           </View>
         </View>
 
         {/* Title */}
-        <Animated.View style={[styles.titleArea, titleStyle]}>
-          <Text style={styles.title}>
-            Great work{userName ? `, ${userName}` : ''}! 🎉
-          </Text>
-          {groups.length > 0 && (
-            <Text style={styles.subtitle}>
-              {groups.map((g) => g.charAt(0).toUpperCase() + g.slice(1)).join(' + ')} session complete
+        <Animated.View style={[s.titleArea, titleStyle]}>
+          <Text style={s.title}>Great work{name ? `, ${name}` : ''}! 🎉</Text>
+          {(data?.muscleGroups?.length ?? 0) > 0 && (
+            <Text style={s.subtitle}>
+              {data!.muscleGroups.map((g) => g[0].toUpperCase() + g.slice(1)).join(' + ')} complete
             </Text>
           )}
         </Animated.View>
 
         {/* Stats */}
-        <View style={styles.statsGrid}>
-          <StatCard icon="🏋️" value={String(exercisesDone)} label="Exercises" />
-          <StatCard icon="🔁" value={String(totalSets)} label="Total Sets" />
-          <StatCard icon="🔥" value={`~${calories}`} label="Calories" />
-        </View>
+        <Animated.View style={[s.statsRow, titleStyle]}>
+          <StatPill icon="🏋️" value={String(exercises)} label="Exercises" />
+          <StatPill icon="🔁" value={String(sets)} label="Sets" />
+          <StatPill icon="🔥" value={`~${calories}`} label="kcal" />
+        </Animated.View>
 
-        {/* Motivational message */}
-        <Animated.View style={[styles.motivCard, titleStyle]}>
-          <Text style={styles.motivText}>
-            {exercisesDone >= 4
-              ? "You showed up and crushed it. That's what separates the committed from everyone else. 💪"
-              : exercisesDone >= 2
-              ? "Every session counts. You're building momentum — keep it going!"
-              : "Getting started is the hardest part. You did it — see you next time!"}
+        {/* Motivational */}
+        <Animated.View style={[s.motivCard, titleStyle]}>
+          <Text style={s.motivText}>
+            {exercises >= 4
+              ? 'You showed up and delivered. That\'s what separates the consistent from everyone else. 💪'
+              : exercises >= 2
+              ? 'Every session builds momentum. You\'re on the right track — keep going!'
+              : 'The hardest part is starting. You did it — see you next time!'}
           </Text>
         </Animated.View>
 
-        {/* Action buttons */}
-        <Animated.View style={[styles.buttons, titleStyle]}>
-          <TouchableOpacity style={styles.secondaryBtn} onPress={handleLogAnother} activeOpacity={0.85}>
-            <Text style={styles.secondaryBtnText}>+ Log Another</Text>
+        {/* Actions */}
+        <Animated.View style={[s.buttons, titleStyle]}>
+          <TouchableOpacity style={s.dashBtn} onPress={handleDashboard} activeOpacity={0.85}>
+            <Text style={s.dashBtnText}>📊 View Progress</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.primaryBtn} onPress={handleBackHome} activeOpacity={0.9}>
-            <Text style={styles.primaryBtnText}>Back to Home</Text>
+          <TouchableOpacity style={s.secondaryBtn} onPress={handleHome} activeOpacity={0.85}>
+            <Text style={s.secondaryBtnText}>+ Train Again</Text>
           </TouchableOpacity>
         </Animated.View>
+
       </ScrollView>
     </SafeAreaView>
   )
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: C.bg },
+function StatPill({ icon, value, label }: { icon: string; value: string; label: string }) {
+  return (
+    <View style={s.pill}>
+      <Text style={s.pillIcon}>{icon}</Text>
+      <Text style={s.pillValue}>{value}</Text>
+      <Text style={s.pillLabel}>{label}</Text>
+    </View>
+  )
+}
+
+const s = StyleSheet.create({
+  safe:   { flex: 1, backgroundColor: C.bg },
   scroll: { paddingHorizontal: 24, paddingTop: 40, paddingBottom: 60 },
 
-  celebrationArea: {
-    alignItems: 'center',
-    marginBottom: 36,
-  },
-  checkWrapper: {
-    width: 120,
-    height: 120,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  celebArea: { alignItems: 'center', marginBottom: 32 },
+  checkWrap: { width: 120, height: 120, justifyContent: 'center', alignItems: 'center' },
   ring: {
-    position: 'absolute',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 3,
-    borderColor: C.accent,
+    position: 'absolute', width: 120, height: 120, borderRadius: 60,
+    borderWidth: 3, borderColor: C.purple,
   },
   checkCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: C.accent,
-    justifyContent: 'center',
-    alignItems: 'center',
+    width: 100, height: 100, borderRadius: 50,
+    backgroundColor: C.purple,
+    justifyContent: 'center', alignItems: 'center',
   },
-  checkmark: {
-    fontSize: 48,
-    fontWeight: '900',
-    color: '#000',
-    lineHeight: 56,
-  },
+  checkmark: { fontSize: 48, fontWeight: '900', color: '#FFF', lineHeight: 56 },
 
-  titleArea: {
-    alignItems: 'center',
-    marginBottom: 36,
-  },
-  title: {
-    fontSize: 30,
-    fontWeight: '800',
-    color: C.text,
-    textAlign: 'center',
-    marginBottom: 8,
-    lineHeight: 38,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: C.muted,
-    textAlign: 'center',
-  },
+  titleArea:  { alignItems: 'center', marginBottom: 28 },
+  title:      { fontSize: 28, fontWeight: '800', color: C.text, textAlign: 'center', marginBottom: 6, lineHeight: 36 },
+  subtitle:   { fontSize: 15, color: C.textMuted, textAlign: 'center' },
 
-  statsGrid: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 24,
+  statsRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
+  pill: {
+    flex: 1, backgroundColor: C.card, borderRadius: 18,
+    borderWidth: 1, borderColor: C.border,
+    padding: 14, alignItems: 'center',
   },
-  statCard: {
-    flex: 1,
-    backgroundColor: C.card,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 16,
-    alignItems: 'center',
-  },
-  statIcon: { fontSize: 24, marginBottom: 8 },
-  statValue: { fontSize: 26, fontWeight: '800', color: C.accent, marginBottom: 4 },
-  statLabel: { fontSize: 12, fontWeight: '600', color: C.muted, textAlign: 'center' },
+  pillIcon:  { fontSize: 20, marginBottom: 6 },
+  pillValue: { fontSize: 22, fontWeight: '800', color: C.purple, marginBottom: 2 },
+  pillLabel: { fontSize: 11, fontWeight: '600', color: C.textMuted },
 
   motivCard: {
-    backgroundColor: C.card,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 20,
-    marginBottom: 32,
+    backgroundColor: C.card, borderRadius: 20, borderWidth: 1,
+    borderColor: C.border, padding: 20, marginBottom: 28,
   },
-  motivText: {
-    fontSize: 15,
-    color: '#AAA',
-    lineHeight: 22,
-    textAlign: 'center',
-  },
+  motivText: { fontSize: 14, color: C.textDim, lineHeight: 22, textAlign: 'center' },
 
-  buttons: {
-    gap: 12,
+  buttons:       { gap: 12 },
+  dashBtn: {
+    backgroundColor: C.purple, borderRadius: 18,
+    paddingVertical: 18, alignItems: 'center',
   },
-  primaryBtn: {
-    backgroundColor: C.accent,
-    borderRadius: 20,
-    paddingVertical: 18,
-    alignItems: 'center',
-  },
-  primaryBtnText: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#000',
-  },
+  dashBtnText: { fontSize: 16, fontWeight: '800', color: '#FFF' },
   secondaryBtn: {
-    backgroundColor: C.card,
-    borderRadius: 20,
-    paddingVertical: 18,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: C.border,
+    backgroundColor: C.card, borderRadius: 18, paddingVertical: 18,
+    alignItems: 'center', borderWidth: 1, borderColor: C.border,
   },
-  secondaryBtnText: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: C.text,
-  },
+  secondaryBtnText: { fontSize: 16, fontWeight: '700', color: C.text },
 })

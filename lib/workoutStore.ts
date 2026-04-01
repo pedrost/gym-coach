@@ -3,6 +3,7 @@ import { Exercise } from './workoutData'
 type ActiveWorkout = {
   exercises: Exercise[]
   muscleGroups: string[]
+  chooseReason?: string
 }
 
 type CompletedWorkout = {

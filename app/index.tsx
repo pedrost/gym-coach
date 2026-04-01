@@ -30,7 +30,11 @@ import {
 import { getWorkoutExercises } from '../lib/workoutEngine'
 import { setActiveWorkout } from '../lib/workoutStore'
 import { MUSCLE_GROUP_LABELS, MUSCLE_GROUP_ICONS, MuscleGroup } from '../lib/workoutData'
-import { getAIRecommendation, THINKING_PHRASES } from '../lib/aiCoach'
+import {
+  getAIRecommendation, getFocusRecommendation,
+  THINKING_PHRASES, ANALYSIS_PHRASES,
+  FocusType,
+} from '../lib/aiCoach'
 
 const { width: W } = Dimensions.get('window')
 
@@ -59,7 +63,132 @@ const FOCUS_CONFIG: Record<Focus, {
   },
 }
 
-// ─── AI Thinking Overlay ──────────────────────────────────────────────────────
+// ─── Shared spinner + phrase cycling logic ────────────────────────────────────
+
+function ThinkingSpinner({ spinAngle }: { spinAngle: ReturnType<typeof useSharedValue<number>> }) {
+  const style = useAnimatedStyle(() => ({ transform: [{ rotate: `${spinAngle.value}deg` }] }))
+  return <Animated.View style={[s.thinkSpinner, style]} />
+}
+
+// ─── Focus thinking overlay (Panel 1) ────────────────────────────────────────
+// Two phases:
+//   1. "Analysing" — spinner + cycling phrases (~1.8s minimum)
+//   2. "Reveal"    — reasoning text + focus badge shown for 2.2s, then fade out
+
+function FocusThinkingOverlay({ visible, onDone, profile, history }: {
+  visible:  boolean
+  onDone:   (focus: FocusType, reasoning: string) => void
+  profile:  UserProfile
+  history:  Awaited<ReturnType<typeof getWorkoutHistory>>
+}) {
+  type Phase = 'analysing' | 'reveal'
+  const [phase,     setPhase]     = useState<Phase>('analysing')
+  const [phraseIdx, setPhraseIdx] = useState(0)
+  const [result,    setResult]    = useState<{ focus: FocusType; reasoning: string } | null>(null)
+
+  const overlayOpacity  = useSharedValue(0)
+  const cardScale       = useSharedValue(0.88)
+  const spinAngle       = useSharedValue(0)
+  const phraseOpacity   = useSharedValue(1)
+  const revealOpacity   = useSharedValue(0)
+  const revealY         = useSharedValue(12)
+  const intervalRef     = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const FOCUS_META: Record<FocusType, { icon: string; label: string }> = {
+    upper: { icon: '🏋️', label: 'Upper Body' },
+    lower: { icon: '🦵', label: 'Lower Body' },
+    full:  { icon: '⚡', label: 'Full Body'  },
+  }
+
+  useEffect(() => {
+    if (!visible) {
+      setPhase('analysing')
+      setResult(null)
+      return
+    }
+
+    overlayOpacity.value = withTiming(1,  { duration: 260 })
+    cardScale.value      = withSpring(1,  { damping: 16 })
+    spinAngle.value      = withRepeat(
+      withTiming(360, { duration: 1100, easing: Easing.linear }), -1, false
+    )
+
+    setPhraseIdx(0)
+    let idx = 0
+    intervalRef.current = setInterval(() => {
+      phraseOpacity.value = withSequence(withTiming(0, { duration: 180 }), withTiming(1, { duration: 180 }))
+      idx = (idx + 1) % ANALYSIS_PHRASES.length
+      setTimeout(() => setPhraseIdx(idx), 180)
+    }, 900)
+
+    const minDelay = new Promise<void>((r) => setTimeout(r, 1800))
+    const aiCall   = getFocusRecommendation(profile, history)
+
+    Promise.all([minDelay, aiCall]).then(([, rec]) => {
+      if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
+
+      // Transition to reveal phase
+      phraseOpacity.value = withTiming(0, { duration: 200 })
+      setTimeout(() => {
+        setResult({ focus: rec.focus, reasoning: rec.reasoning })
+        setPhase('reveal')
+        revealOpacity.value = withTiming(1,  { duration: 420 })
+        revealY.value       = withTiming(0,  { duration: 380 })
+
+        // After 2.2s of showing the reasoning, fade out and call onDone
+        setTimeout(() => {
+          overlayOpacity.value = withTiming(0, { duration: 260 })
+          setTimeout(() => runOnJS(onDone)(rec.focus, rec.reasoning), 260)
+        }, 2200)
+      }, 220)
+    })
+
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
+  }, [visible])
+
+  const overlayStyle = useAnimatedStyle(() => ({ opacity: overlayOpacity.value }))
+  const cardStyle    = useAnimatedStyle(() => ({ transform: [{ scale: cardScale.value }] }))
+  const phraseStyle  = useAnimatedStyle(() => ({ opacity: phraseOpacity.value }))
+  const revealStyle  = useAnimatedStyle(() => ({ opacity: revealOpacity.value, transform: [{ translateY: revealY.value }] }))
+
+  if (!visible) return null
+
+  const meta = result ? FOCUS_META[result.focus] : null
+
+  return (
+    <Animated.View style={[StyleSheet.absoluteFillObject, s.thinkOverlay, overlayStyle]}>
+      <Animated.View style={[s.thinkCard, cardStyle]}>
+
+        {/* Spinner always visible */}
+        <ThinkingSpinner spinAngle={spinAngle} />
+
+        {/* Phase 1: cycling analysis phrases */}
+        {phase === 'analysing' && (
+          <>
+            <Text style={s.thinkTitle}>Coach is analysing…</Text>
+            <Animated.Text style={[s.thinkPhrase, phraseStyle]}>
+              {ANALYSIS_PHRASES[phraseIdx]}
+            </Animated.Text>
+          </>
+        )}
+
+        {/* Phase 2: reasoning reveal */}
+        {phase === 'reveal' && meta && result && (
+          <Animated.View style={[s.revealWrap, revealStyle]}>
+            <View style={s.revealBadge}>
+              <Text style={s.revealBadgeIcon}>{meta.icon}</Text>
+              <Text style={s.revealBadgeLabel}>{meta.label}</Text>
+            </View>
+            <Text style={s.revealReasoning}>{result.reasoning}</Text>
+          </Animated.View>
+        )}
+
+      </Animated.View>
+    </Animated.View>
+  )
+}
+
+// ─── Muscle-group thinking overlay (Panel 2) ─────────────────────────────────
 
 function ThinkingOverlay({ visible, onDone, profile, history }: {
   visible: boolean
@@ -80,17 +209,13 @@ function ThinkingOverlay({ visible, onDone, profile, history }: {
     overlayOpacity.value = withTiming(1, { duration: 260 })
     cardScale.value      = withSpring(1, { damping: 16 })
     spinAngle.value      = withRepeat(
-      withTiming(360, { duration: 1100, easing: Easing.linear }),
-      -1, false
+      withTiming(360, { duration: 1100, easing: Easing.linear }), -1, false
     )
 
     setPhraseIdx(0)
     let idx = 0
     intervalRef.current = setInterval(() => {
-      phraseOpacity.value = withSequence(
-        withTiming(0, { duration: 180 }),
-        withTiming(1, { duration: 180 })
-      )
+      phraseOpacity.value = withSequence(withTiming(0, { duration: 180 }), withTiming(1, { duration: 180 }))
       idx = (idx + 1) % THINKING_PHRASES.length
       setTimeout(() => setPhraseIdx(idx), 180)
     }, 950)
@@ -117,7 +242,7 @@ function ThinkingOverlay({ visible, onDone, profile, history }: {
   return (
     <Animated.View style={[StyleSheet.absoluteFillObject, s.thinkOverlay, overlayStyle]}>
       <Animated.View style={[s.thinkCard, cardStyle]}>
-        <Animated.View style={[s.thinkSpinner, spinStyle]} />
+        <ThinkingSpinner spinAngle={spinAngle} />
         <Text style={s.thinkTitle}>Your Coach is Thinking</Text>
         <Animated.Text style={[s.thinkPhrase, phraseStyle]}>
           {THINKING_PHRASES[phraseIdx]}
@@ -175,6 +300,7 @@ export default function HomeScreen() {
   const [focus, setFocus]                   = useState<Focus | null>(null)
   const [selectedGroups, setSelectedGroups] = useState<Set<MuscleGroup>>(new Set())
   const [thinking, setThinking]             = useState(false)
+  const [focusThinking, setFocusThinking]   = useState(false)
 
   const headerOpacity = useSharedValue(0)
   const headerY       = useSharedValue(16)
@@ -240,6 +366,11 @@ export default function HomeScreen() {
     router.push('/workout')
   }
 
+  function onFocusThinkingDone(chosenFocus: FocusType, reasoning: string) {
+    setFocusThinking(false)
+    selectFocus(chosenFocus as Focus)
+  }
+
   async function onThinkingDone(reason: string, group: MuscleGroup) {
     setThinking(false)
     if (!profile) return
@@ -296,6 +427,19 @@ export default function HomeScreen() {
                   />
                 ))}
               </View>
+
+              {/* AI choose for me — Panel 1 */}
+              <TouchableOpacity
+                style={s.focusChooseBtn}
+                onPress={() => setFocusThinking(true)}
+                activeOpacity={0.85}
+              >
+                <Text style={s.focusChooseBtnIcon}>🤖</Text>
+                <View style={s.focusChooseBtnBody}>
+                  <Text style={s.focusChooseBtnTitle}>Let AI decide for me</Text>
+                  <Text style={s.focusChooseBtnSub}>Coach picks based on your history</Text>
+                </View>
+              </TouchableOpacity>
             </ScrollView>
           </View>
 
@@ -380,7 +524,17 @@ export default function HomeScreen() {
         </Animated.View>
       </View>
 
-      {/* AI overlay — full-screen, sits above everything */}
+      {/* Focus AI overlay (Panel 1) */}
+      {profile && (
+        <FocusThinkingOverlay
+          visible={focusThinking}
+          profile={profile}
+          history={history}
+          onDone={onFocusThinkingDone}
+        />
+      )}
+
+      {/* Muscle AI overlay (Panel 2) */}
       {profile && (
         <ThinkingOverlay
           visible={thinking}
@@ -461,6 +615,23 @@ const s = StyleSheet.create({
 
   panelTitle: { fontSize: 21, fontWeight: '800', color: C.text, marginBottom: 6, marginTop: 4 },
   panelSub:   { fontSize: 13, color: C.textMuted, marginBottom: 16 },
+
+  // "Let AI decide" button on Panel 1
+  focusChooseBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginTop: 20,
+    backgroundColor: C.card,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: C.purple + '55',
+    padding: 18,
+  },
+  focusChooseBtnIcon:  { fontSize: 26 },
+  focusChooseBtnBody:  { flex: 1 },
+  focusChooseBtnTitle: { fontSize: 15, fontWeight: '700', color: C.purple },
+  focusChooseBtnSub:   { fontSize: 12, color: C.textMuted, marginTop: 2 },
 
   // Focus cards
   focusCards: { gap: 14, marginTop: 10 },
@@ -562,4 +733,19 @@ const s = StyleSheet.create({
   },
   thinkTitle:  { fontSize: 19, fontWeight: '800', color: C.text, marginBottom: 12, textAlign: 'center' },
   thinkPhrase: { fontSize: 14, color: C.textMuted, textAlign: 'center', lineHeight: 22 },
+
+  // Focus reveal phase (FocusThinkingOverlay phase 2)
+  revealWrap: { alignItems: 'center', width: '100%' },
+  revealBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: C.purple + '22', borderRadius: 14,
+    paddingHorizontal: 18, paddingVertical: 10, marginBottom: 18,
+    borderWidth: 1, borderColor: C.purple + '55',
+  },
+  revealBadgeIcon:  { fontSize: 24 },
+  revealBadgeLabel: { fontSize: 17, fontWeight: '800', color: C.purple },
+  revealReasoning: {
+    fontSize: 15, color: C.text, textAlign: 'center',
+    lineHeight: 23, fontWeight: '500',
+  },
 })

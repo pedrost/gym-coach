@@ -2,26 +2,212 @@ import { MuscleGroup } from './workoutData'
 import { UserProfile, WorkoutRecord } from './storage'
 
 const OLLAMA_URL = 'http://localhost:11434'
-const MODEL = 'qwen2.5:4b'
+const MODEL      = 'qwen2.5:4b'
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export type FocusType = 'upper' | 'lower' | 'full'
+
+export type FocusRecommendation = {
+  focus:     FocusType
+  reasoning: string      // 1 sentence, direct, uses user's name
+  source:    'ai' | 'algorithm'
+}
 
 export type AIRecommendation = {
-  group: MuscleGroup
+  group:  MuscleGroup
   reason: string
   source: 'ai' | 'algorithm'
 }
 
+// ─── Shared UI phrases ────────────────────────────────────────────────────────
+
+export const ANALYSIS_PHRASES = [
+  'Reading your workout history...',
+  'Checking muscle recovery times...',
+  'Analysing training balance...',
+  'Reviewing your recent sessions...',
+  'Computing optimal recovery...',
+  'Consulting exercise science...',
+]
+
 export const THINKING_PHRASES = [
-  'Analyzing your training history...',
+  'Analysing your training history...',
   'Reviewing your muscle balance...',
   'Checking your recovery data...',
-  'Optimizing for your level...',
+  'Optimising for your level...',
   'Computing your ideal workout...',
   'Consulting training science...',
   'Balancing volume and intensity...',
   'Almost ready...',
 ]
 
-function buildPrompt(profile: UserProfile, history: WorkoutRecord[]): string {
+// ─── Ollama helper ────────────────────────────────────────────────────────────
+
+async function callOllama(prompt: string, timeoutMs = 8000): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+    const res = await fetch(`${OLLAMA_URL}/api/generate`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model:   MODEL,
+        prompt,
+        stream:  false,
+        format:  'json',
+        options: { temperature: 0.65, num_predict: 120 },
+      }),
+      signal: controller.signal,
+    })
+
+    clearTimeout(timer)
+    if (!res.ok) return null
+
+    const data = await res.json()
+    return data.response ?? null
+  } catch {
+    return null
+  }
+}
+
+// ─── Focus recommendation (upper / lower / full body) ─────────────────────────
+
+function buildFocusPrompt(profile: UserProfile, history: WorkoutRecord[]): string {
+  // Build a dated history summary
+  const now = Date.now()
+  const historyLines = history.slice(0, 7).map((w) => {
+    const daysAgo = Math.round((now - new Date(w.date).getTime()) / 86_400_000)
+    const label   = daysAgo === 0 ? 'today' : daysAgo === 1 ? 'yesterday' : `${daysAgo} days ago`
+    const groups  = w.muscleGroups.join(', ')
+    return `  - ${label}: ${groups}`
+  }).join('\n') || '  - no sessions recorded yet'
+
+  return `You are an expert personal trainer creating a daily training plan.
+
+=== USER PROFILE ===
+Name: ${profile.name}
+Sex: ${profile.sex}
+Experience level: ${profile.level}
+Body weight: ${profile.weight} ${profile.weightUnit}
+
+=== RECENT WORKOUT HISTORY (newest first) ===
+${historyLines}
+
+=== YOUR TASK ===
+Decide which training FOCUS is best for ${profile.name} TODAY.
+
+Focus definitions:
+- "upper": targets Back, Chest, Arms, Shoulders
+- "lower": targets Legs and Core
+- "full":  targets all muscle groups (ideal after rest days, or for beginners)
+
+=== REASONING RULES ===
+1. Muscles need 48-72 hours of recovery after training.
+2. "upper" groups (back, chest, arms, shoulders) share recovery — training any of them counts as "upper".
+3. "lower" groups (legs, core) share recovery — training either counts as "lower".
+4. If upper was trained < 2 days ago, prefer "lower" (or "full" if lower was also recent).
+5. If lower was trained < 2 days ago, prefer "upper" (or "full" if upper was also recent).
+6. If no history, recommend "full" to build habit.
+7. Write reasoning as ONE sentence addressed directly to ${profile.name}.
+8. Mention the specific history reason (e.g. "Since you trained back yesterday...").
+9. End with a motivating phrase. Maximum 22 words total.
+
+=== REQUIRED OUTPUT ===
+Respond with ONLY valid JSON — no markdown, no explanation:
+{"focus":"upper","reasoning":"Since you crushed legs yesterday, Pedro, your upper body is fully rested and ready to go!"}`
+}
+
+function algorithmicFocusRecommendation(
+  profile: UserProfile,
+  history:  WorkoutRecord[]
+): FocusRecommendation {
+  const now = Date.now()
+  const DAY = 86_400_000
+
+  const upperGroups = new Set<string>(['back', 'chest', 'arms', 'shoulders'])
+  const lowerGroups = new Set<string>(['legs', 'core'])
+
+  let lastUpperDays = 99
+  let lastLowerDays = 99
+
+  for (const w of history) {
+    const days = (now - new Date(w.date).getTime()) / DAY
+    for (const g of w.muscleGroups) {
+      if (upperGroups.has(g) && days < lastUpperDays) lastUpperDays = days
+      if (lowerGroups.has(g) && days < lastLowerDays) lastLowerDays = days
+    }
+  }
+
+  const name = profile.name
+
+  if (lastUpperDays < 2 && lastLowerDays < 2) {
+    return {
+      focus:     'full',
+      reasoning: `Both upper and lower body need more rest, ${name} — a light full-body session is perfect today!`,
+      source:    'algorithm',
+    }
+  }
+  if (lastUpperDays < 2) {
+    return {
+      focus:     'lower',
+      reasoning: `Since you trained upper body recently, ${name}, it's the perfect time to hit legs and core!`,
+      source:    'algorithm',
+    }
+  }
+  if (lastLowerDays < 2) {
+    return {
+      focus:     'upper',
+      reasoning: `Legs are still recovering, ${name} — let's capitalise on that and hit upper body hard today!`,
+      source:    'algorithm',
+    }
+  }
+  if (lastUpperDays === 99 && lastLowerDays === 99) {
+    return {
+      focus:     'full',
+      reasoning: `No sessions logged yet — a full-body workout is the best way to kick things off, ${name}!`,
+      source:    'algorithm',
+    }
+  }
+  // Both are rested — prefer whichever was trained longer ago
+  if (lastUpperDays >= lastLowerDays) {
+    return {
+      focus:     'upper',
+      reasoning: `Upper body has had a solid rest, ${name} — it's primed and ready for a great session today!`,
+      source:    'algorithm',
+    }
+  }
+  return {
+    focus:     'lower',
+    reasoning: `Lower body is fully recovered, ${name} — let's make the most of it with a strong leg day!`,
+    source:    'algorithm',
+  }
+}
+
+export async function getFocusRecommendation(
+  profile: UserProfile,
+  history: WorkoutRecord[]
+): Promise<FocusRecommendation> {
+  const prompt = buildFocusPrompt(profile, history)
+  const raw    = await callOllama(prompt)
+
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw)
+      const validFocuses: FocusType[] = ['upper', 'lower', 'full']
+      if (validFocuses.includes(parsed.focus) && typeof parsed.reasoning === 'string') {
+        return { focus: parsed.focus as FocusType, reasoning: parsed.reasoning, source: 'ai' }
+      }
+    } catch { /* fall through to algorithm */ }
+  }
+
+  return algorithmicFocusRecommendation(profile, history)
+}
+
+// ─── Muscle-group recommendation (Panel 2 "choose for me") ───────────────────
+
+function buildMusclePrompt(profile: UserProfile, history: WorkoutRecord[]): string {
   const recentGroups = history
     .slice(0, 5)
     .flatMap((w) => w.muscleGroups)
@@ -47,62 +233,19 @@ Respond ONLY with valid JSON, no other text:
 {"group": "<one of the valid groups>", "reason": "<brief motivating reason>"}`
 }
 
-async function callOllama(prompt: string): Promise<AIRecommendation | null> {
-  try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 8000)
-
-    const res = await fetch(`${OLLAMA_URL}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: MODEL,
-        prompt,
-        stream: false,
-        format: 'json',
-        options: { temperature: 0.7, num_predict: 80 },
-      }),
-      signal: controller.signal,
-    })
-
-    clearTimeout(timeout)
-
-    if (!res.ok) return null
-
-    const data = await res.json()
-    const parsed = JSON.parse(data.response)
-
-    const validGroups: MuscleGroup[] = ['back', 'chest', 'arms', 'legs', 'shoulders', 'core']
-    if (!validGroups.includes(parsed.group)) return null
-
-    return {
-      group: parsed.group as MuscleGroup,
-      reason: parsed.reason ?? 'Great choice for today.',
-      source: 'ai',
-    }
-  } catch {
-    return null
-  }
-}
-
-function algorithmicRecommendation(
+function algorithmicMuscleRecommendation(
   profile: UserProfile,
   history: WorkoutRecord[]
 ): AIRecommendation {
   const allGroups: MuscleGroup[] = ['back', 'chest', 'arms', 'legs', 'shoulders', 'core']
 
   const recentlyTrained = new Set(
-    history
-      .slice(0, 3)
-      .flatMap((w) => w.muscleGroups)
+    history.slice(0, 3).flatMap((w) => w.muscleGroups)
   )
 
-  // Prefer groups not recently trained
   const fresh = allGroups.filter((g) => !recentlyTrained.has(g))
-  const pool = fresh.length > 0 ? fresh : allGroups
+  const pool  = fresh.length > 0 ? fresh : allGroups
   const group = pool[Math.floor(Math.random() * pool.length)]
-
-  const label = group.charAt(0).toUpperCase() + group.slice(1)
 
   const reasons: Record<string, Record<MuscleGroup, string>> = {
     beginner: {
@@ -131,20 +274,25 @@ function algorithmicRecommendation(
     },
   }
 
-  return {
-    group,
-    reason: reasons[profile.level][group],
-    source: 'algorithm',
-  }
+  return { group, reason: reasons[profile.level][group], source: 'algorithm' }
 }
 
 export async function getAIRecommendation(
   profile: UserProfile,
   history: WorkoutRecord[]
 ): Promise<AIRecommendation> {
-  const prompt = buildPrompt(profile, history)
-  const aiResult = await callOllama(prompt)
+  const prompt = buildMusclePrompt(profile, history)
+  const raw    = await callOllama(prompt)
 
-  if (aiResult) return aiResult
-  return algorithmicRecommendation(profile, history)
+  if (raw) {
+    try {
+      const parsed     = JSON.parse(raw)
+      const validGroups: MuscleGroup[] = ['back', 'chest', 'arms', 'legs', 'shoulders', 'core']
+      if (validGroups.includes(parsed.group)) {
+        return { group: parsed.group as MuscleGroup, reason: parsed.reason ?? 'Great choice for today.', source: 'ai' }
+      }
+    } catch { /* fall through */ }
+  }
+
+  return algorithmicMuscleRecommendation(profile, history)
 }

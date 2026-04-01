@@ -432,13 +432,13 @@ const s = StyleSheet.create({
     backgroundColor: C.bg,  // ← prevents white flash
   },
   slideRow: {
-    flex: 1,
     flexDirection: 'row',
-    width: W * 2,   // explicit 2-panel width; overflow:hidden on wrapper clips it
+    width: W * 2,   // two panels side by side; overflow:hidden on wrapper clips panel 2
+    height: '100%', // fills slideWrapper height without fighting the explicit width
   },
   panel: {
     width: W,
-    flex: 0,
+    height: '100%',
     backgroundColor: C.bg,
   },
 

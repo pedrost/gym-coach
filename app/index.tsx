@@ -135,11 +135,13 @@ function FocusThinkingOverlay({ visible, onDone, profile, history }: {
         revealOpacity.value = withTiming(1,  { duration: 420 })
         revealY.value       = withTiming(0,  { duration: 380 })
 
-        // After 2.2s of showing the reasoning, fade out and call onDone
+        // Reading time: ~250ms per word, min 2.5s, max 7s
+        const words      = rec.reasoning.trim().split(/\s+/).length
+        const readingMs  = Math.max(2500, Math.min(7000, words * 250))
         setTimeout(() => {
           overlayOpacity.value = withTiming(0, { duration: 260 })
           setTimeout(() => runOnJS(onDone)(rec.focus, rec.reasoning), 260)
-        }, 2200)
+        }, readingMs)
       }, 220)
     })
 

@@ -335,7 +335,7 @@ export default function WorkoutScreen() {
     if (weight > 0) saveWeightForExercise(ex.id, weight)
   }
 
-  async function handleSetDone() {
+  function handleSetDone() {
     const ex = exercises[currentIdx]
     if (!ex || !profile) return
 
@@ -344,17 +344,22 @@ export default function WorkoutScreen() {
     if (currentSetNum < ex.sets) {
       // More sets remaining — rest between sets
       setCurrentSetNum((n) => n + 1)
-      animateCardOut(() => {
-        startRest()
-      })
+      animateCardOut(() => { startRest() })
     } else {
-      // All sets done — move to next exercise
+      // All sets done for this exercise
+      // Build the complete record for this exercise including the current set,
+      // since recordSet() updates state asynchronously and exerciseRecords in
+      // this closure won't reflect the just-added set yet.
+      const currentSetRecord = { setNumber: currentSetNum, repsCompleted: ex.reps, weightKg: currentWeight }
+      const existingRecord   = exerciseRecords.find((r) => r.exerciseId === ex.id)
+      const thisExRecord: ExerciseRecord = existingRecord
+        ? { ...existingRecord, sets: [...existingRecord.sets, currentSetRecord] }
+        : { exerciseId: ex.id, exerciseName: ex.name, muscleGroup: ex.muscleGroup, sets: [currentSetRecord], skipped: false }
+
+      const prevRecords = exerciseRecords.filter((r) => r.exerciseId !== ex.id)
+
       if (currentIdx >= exercises.length - 1) {
-        await finishWorkout([...exerciseRecords, {
-          exerciseId: ex.id, exerciseName: ex.name,
-          muscleGroup: ex.muscleGroup,
-          sets: [], skipped: false,
-        }])
+        finishWorkout([...prevRecords, thisExRecord])
         return
       }
       animateCardOut(() => {
@@ -442,7 +447,7 @@ export default function WorkoutScreen() {
     })
   }
 
-  async function finishWorkout(finalRecords: ExerciseRecord[]) {
+  function finishWorkout(finalRecords: ExerciseRecord[]) {
     const doneRecords = finalRecords.filter((r) => !r.skipped && r.sets.length > 0)
     const totalSets = doneRecords.reduce((s, r) => s + r.sets.length, 0)
     const totalVolumeKg = doneRecords.reduce(
@@ -461,8 +466,9 @@ export default function WorkoutScreen() {
       totalVolumeKg: Math.round(totalVolumeKg),
       estimatedCalories: calories,
     }
-    await saveWorkoutRecord(record)
 
+    // Set data then navigate synchronously — no await before router.replace to avoid
+    // async re-render races that produce a blank workout screen during transition
     setCompletedWorkout({
       userName: profile?.name ?? '',
       exercisesCompleted: doneRecords.length,
@@ -471,6 +477,7 @@ export default function WorkoutScreen() {
       muscleGroups: workout?.muscleGroups ?? [],
     })
     router.replace('/complete')
+    saveWorkoutRecord(record)  // fire-and-forget, doesn't need to block navigation
   }
 
   const cardStyle = useAnimatedStyle(() => ({

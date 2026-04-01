@@ -453,7 +453,8 @@ export default function WorkoutScreen() {
     const totalVolumeKg = doneRecords.reduce(
       (s, r) => s + r.sets.reduce((ss, set) => ss + set.weightKg * set.repsCompleted, 0), 0
     )
-    const calories = Math.round(totalSets * 5.5)
+    // ~8 kcal base per set (strength training average) + 0.04 kcal per kg of volume lifted
+    const calories = Math.round(totalSets * 8 + totalVolumeKg * 0.04)
     const durationMinutes = Math.round((Date.now() - startTime) / 60000)
 
     const record = {

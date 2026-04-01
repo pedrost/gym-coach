@@ -121,6 +121,26 @@ export async function saveWeightForExercise(exerciseId: string, weightKg: number
   }
 }
 
+// ─── Suggested starting weight ───────────────────────────────────────────────
+//
+// Used when no previous weight is recorded for an exercise.
+// Estimates a sensible starting load from body weight + training level.
+
+export function suggestStartingWeight(profile: UserProfile, muscleGroup: string): number {
+  const bwKg = profile.weightUnit === 'lbs' ? profile.weight * 0.4536 : profile.weight
+
+  // Base multiplier = fraction of body weight per muscle group
+  const base: Record<string, number> = {
+    legs: 0.55, back: 0.35, chest: 0.35,
+    shoulders: 0.20, arms: 0.15, core: 0.10,
+  }
+  const levelMult = { beginner: 1, intermediate: 1.6, advanced: 2.3 }
+
+  const raw = bwKg * (base[muscleGroup] ?? 0.20) * (levelMult[profile.level] ?? 1)
+  // Round to nearest 2.5 kg, minimum 2.5
+  return Math.max(2.5, Math.round(raw / 2.5) * 2.5)
+}
+
 // ─── Dashboard aggregates ─────────────────────────────────────────────────────
 
 export type DashboardStats = {

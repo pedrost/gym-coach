@@ -34,6 +34,7 @@ import {
   saveWorkoutRecord,
   saveWeightForExercise,
   getLastWeightForExercise,
+  suggestStartingWeight,
   UserProfile,
   SetRecord,
   ExerciseRecord,
@@ -247,13 +248,19 @@ export default function WorkoutScreen() {
     })
   }, [])
 
-  // Load last-used weight when exercise changes
+  // Load last-used weight; fall back to profile-based suggestion for new exercises
   useEffect(() => {
     const ex = exercises[currentIdx]
     if (!ex) return
-    getLastWeightForExercise(ex.id).then(setCurrentWeight)
+    getLastWeightForExercise(ex.id).then((w) => {
+      if (w > 0) {
+        setCurrentWeight(w)
+      } else if (profile) {
+        setCurrentWeight(suggestStartingWeight(profile, ex.muscleGroup))
+      }
+    })
     setCurrentSetNum(1)
-  }, [currentIdx])
+  }, [currentIdx, profile])
 
   // Rest timer tick
   useEffect(() => {
